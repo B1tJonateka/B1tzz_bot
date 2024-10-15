@@ -659,7 +659,7 @@ def remove_existing_job(context: ContextTypes.DEFAULT_TYPE, chat_id):
 
 # Función principal para ejecutar el bot
 async def main():
-    application = Application.builder().token("Token").build()
+    application = Application.builder().token("8094482824:AAHIXYxVtaYbSy1mhG3GCuAcvj5MCF8CbJg").build()
 
     # Establecer los comandos
     await set_commands(application)
