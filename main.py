@@ -7,13 +7,13 @@ import os
 import re
 import json
 
+# Archivo donde se guardarán las configuraciones
+CONFIG_FILE = "group_configs.json"
+
 # Diccionario para almacenar configuraciones por grupo
 group_configs = {}
 user_warnings = {}
 night_mode_configs = {}
-
-# Archivo donde se guardarán las configuraciones
-CONFIG_FILE = "group_configs.json"
 
 # Aplicar nest_asyncio
 nest_asyncio.apply()
@@ -26,22 +26,23 @@ user_warnings = {}
 last_welcome_photo = None
 last_goodbye_photo = None
 
-# Función para guardar las configuraciones en un archivo JSON
-def save_group_configs():
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(group_configs, f)
-
-# Función para cargar las configuraciones desde un archivo JSON
-def load_group_configs():
+# Cargar configuraciones desde archivo
+def load_configs():
     global group_configs
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
+        with open(CONFIG_FILE, 'r') as f:
             group_configs = json.load(f)
     else:
-        group_configs = {}  # Si no hay archivo, inicializa con un diccionario vacío
+        group_configs = {}
+
+# Función para guardar las configuraciones en un archivo JSON
+def save_group_configs():
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(group_configs, f, indent=4)
 
 # Función para obtener o inicializar la configuración de un grupo
 def get_group_config(chat_id):
+    chat_id = str(chat_id)
     if chat_id not in group_configs:
         group_configs[chat_id] = {
             "welcome_message": "¡Bienvenido/a, {first_name}! \n\n¡Esperamos que disfrutes tu estadía!",
@@ -59,6 +60,8 @@ def get_group_config(chat_id):
 
 # Actualizar la configuración de un grupo y guardarla
 def update_group_config(chat_id, key, value):
+    if str(chat_id) not in group_configs:
+        group_configs[str(chat_id)] = {}
     group_configs[str(chat_id)][key] = value
     save_group_configs()
 
@@ -146,6 +149,9 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e:
             print(f"Error al enviar el mensaje de bienvenida: {e}")
 
+        # Guardar configuraciones actualizadas
+        save_group_configs()
+
         await asyncio.sleep(10)
         try:
             if last_welcome_photo:
@@ -153,7 +159,7 @@ async def welcome_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
         except Exception as e:
             print(f"Error al eliminar el mensaje de bienvenida: {e}")
 
-# Función para enviar mensaje de despedida (modificación similar)
+# Función para enviar mensaje de despedida (modificación con más controles)
 async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global last_goodbye_photo
 
@@ -162,20 +168,41 @@ async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     member = update.message.left_chat_member
     if member:
+        # Intentar eliminar el último mensaje de despedida si existe
         if last_goodbye_photo:
             try:
                 await context.bot.delete_message(chat_id=chat_id, message_id=last_goodbye_photo)
             except Exception as e:
                 print(f"Error al eliminar el último mensaje de despedida: {e}")
 
-        goodbye_message = config['goodbye_message'].format(first_name=member.first_name)
-        goodbye_media = config['goodbye_media']
-        sent_message = None
+        # Obtener o asignar valores predeterminados de mensaje y media
+        goodbye_message = config.get('goodbye_message', 'Adiós, {first_name}. ¡Te echaremos de menos!')
+        goodbye_message = goodbye_message.format(first_name=member.first_name)
 
+        goodbye_media = config.get('goodbye_media', '')  # Si no hay media, se asegura que esté vacío
+
+        # Guardar la configuración antes de enviar el mensaje para asegurar su persistencia
+        config['goodbye_message'] = goodbye_message
+        config['goodbye_media'] = goodbye_media
+
+        # Guardar configuraciones actualizadas (proceso explícito antes del envío)
+        save_group_configs()  
+        print(f"Guardando configuraciones antes de enviar el mensaje de despedida para el grupo {chat_id}")
+
+        sent_message = None
         print(f"Enviando mensaje de despedida con media: {goodbye_media}")
 
         try:
-            if goodbye_media.startswith('BA'):
+            # Verificar si goodbye_media es una URL o un file_id
+            if is_url(goodbye_media):
+                if goodbye_media.endswith(('.mp4', '.mov', '.gif', '.GIF')):
+                    sent_message = await context.bot.send_video(chat_id=chat_id, video=goodbye_media, caption=goodbye_message)
+                elif goodbye_media.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    sent_message = await context.bot.send_photo(chat_id=chat_id, photo=goodbye_media, caption=goodbye_message)
+                else:
+                    print(f"Formato de media no soportado: {goodbye_media}")
+                    return
+            elif goodbye_media.startswith('BA'):
                 try:
                     sent_message = await context.bot.send_photo(chat_id=chat_id, photo=goodbye_media, caption=goodbye_message)
                 except Exception as e:
@@ -186,6 +213,7 @@ async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         print(f"Error al enviar el file_id como video: {e}")
                         return
             else:
+                # Verificar tipos de archivo adicionales
                 if goodbye_media.endswith(('.mp4', '.mov', '.gif', '.GIF')):
                     sent_message = await context.bot.send_video(chat_id=chat_id, video=goodbye_media, caption=goodbye_message)
                 elif goodbye_media.endswith(('.jpg', '.jpeg', '.png', '.webp')):
@@ -194,12 +222,18 @@ async def goodbye_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     print(f"Formato de media no soportado: {goodbye_media}")
                     return
 
+            # Si se envió un mensaje, actualizamos el ID del último mensaje de despedida
             if sent_message:
                 last_goodbye_photo = sent_message.message_id
+
+            # Guardar configuraciones actualizadas de nuevo después de enviar el mensaje
+            save_group_configs()  
+            print(f"Configuración del grupo guardada correctamente después de enviar el mensaje para el grupo: {chat_id}")
 
         except Exception as e:
             print(f"Error al enviar el mensaje de despedida: {e}")
 
+        # Eliminar el mensaje de despedida después de 10 segundos
         await asyncio.sleep(10)
         try:
             if last_goodbye_photo:
@@ -218,6 +252,7 @@ async def set_welcome_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Validar si es un enlace
             if new_media_link.startswith('http'):
                 group_config['welcome_media'] = new_media_link  # Actualizar el media de bienvenida solo para este grupo
+                save_group_configs()  # Guardar las configuraciones después de actualizar el enlace
                 await update.message.reply_text(f"El enlace del media de bienvenida ha sido actualizado a:\n{new_media_link}")
             else:
                 await update.message.reply_text("El enlace proporcionado no es válido. Asegúrate de que sea un enlace completo.")
@@ -237,6 +272,7 @@ async def set_goodbye_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Validar si es un enlace
             if new_media_link.startswith('http'):
                 group_config['goodbye_media'] = new_media_link  # Actualizar el media de despedida solo para este grupo
+                save_group_configs()  # Guardar las configuraciones después de actualizar el enlace
                 await update.message.reply_text(f"El enlace del media de despedida ha sido actualizado a:\n{new_media_link}")
             else:
                 await update.message.reply_text("El enlace proporcionado no es válido. Asegúrate de que sea un enlace completo.")
@@ -511,7 +547,6 @@ async def rules_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_group_config(chat_id)
     await update.message.reply_text(f"Reglas del grupo:\n{config['rules']}")
 
-
 # Función para activar o desactivar la auto-mostración de reglas
 async def rules_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -523,16 +558,18 @@ async def rules_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.args and context.args[0].lower() == 'on':
-        update_group_config(chat_id, "auto_rules_enabled", True)
+        config['auto_rules_enabled'] = True
         await update.message.reply_text("La auto-mostración de reglas ha sido activada.")
+        save_group_configs()  # Guardar las configuraciones al crear un nuevo grupo
 
         # Programar la tarea recurrente
         remove_existing_job(context, chat_id)
-        context.job_queue.run_repeating(show_rules_auto, interval=1800, first=5, name=f"rules_auto_job_{chat_id}", chat_id=chat_id)
+        context.job_queue.run_repeating(show_rules_auto, interval=60, first=10, name=f"rules_auto_job_{chat_id}", chat_id=chat_id)
 
     elif context.args and context.args[0].lower() == 'off':
-        update_group_config(chat_id, "auto_rules_enabled", False)
+        config['auto_rules_enabled'] = False
         await update.message.reply_text("La auto-mostración de reglas ha sido desactivada.")
+        save_group_configs()  # Guardar las configuraciones al crear un nuevo grupo
         # Detener el job si está corriendo
         remove_existing_job(context, chat_id)
     else:
@@ -561,8 +598,9 @@ async def rules_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message:
         # Obtener el contenido del mensaje al que se está respondiendo
         new_rules = update.message.reply_to_message.text
-        update_group_config(chat_id, "rules", new_rules)
-        await update.message.reply_text(f"Las reglas han sido actualizadas a:\n{new_rules}")
+        config['rules'] = new_rules
+        save_group_configs()  # Guardar las configuraciones al crear un nuevo grupo
+        await update.message.reply_text(f"Las reglas han sido actualizadas a:\n{config['rules']}")
     else:
         await update.message.reply_text("Por favor, responde al mensaje que contiene las reglas anteriores con el comando /rules_edit.")
 
@@ -660,10 +698,12 @@ def remove_existing_job(context: ContextTypes.DEFAULT_TYPE, chat_id):
 # Función principal para ejecutar el bot
 async def main():
     application = Application.builder().token("8094482824:AAHIXYxVtaYbSy1mhG3GCuAcvj5MCF8CbJg").build()
+    # Cargar configuraciones al iniciar el bot
+    load_configs()
 
     # Establecer los comandos
     await set_commands(application)
-
+    
     # Handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_forbidden_words))
     application.add_handler(CommandHandler("ban", ban_user))
