@@ -564,7 +564,7 @@ async def rules_auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Programar la tarea recurrente
         remove_existing_job(context, chat_id)
-        context.job_queue.run_repeating(show_rules_auto, interval=60, first=10, name=f"rules_auto_job_{chat_id}", chat_id=chat_id)
+        context.job_queue.run_repeating(show_rules_auto, interval=1800, first=10, name=f"rules_auto_job_{chat_id}", chat_id=chat_id)
 
     elif context.args and context.args[0].lower() == 'off':
         config['auto_rules_enabled'] = False
